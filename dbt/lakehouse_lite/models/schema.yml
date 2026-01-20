@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: stg_penguins
+    description: "Staging model for raw penguins dataset."
+    columns:
+      - name: species
+        tests:
+          - not_null
+      - name: island
+        tests:
+          - not_null
+
+  - name: mart_penguin_summary
+    description: "Aggregated penguin metrics by species and sex."
+    columns:
+      - name: species
+        tests:
+          - not_null
+      - name: penguin_count
+        tests:
+          - not_null

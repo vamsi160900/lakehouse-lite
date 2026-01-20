@@ -1,0 +1,30 @@
+[0m16:11:35.396554 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x00000216ADC97C90>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x00000216ADC95990>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x00000216AD9DB0D0>]}
+
+
+============================== 16:11:35.404462 | 555cbaef-7b8a-4670-8e28-d2cc174ca890 ==============================
+[0m16:11:35.404462 [info ] [MainThread]: Running with dbt=1.11.2
+[0m16:11:35.404968 [debug] [MainThread]: running dbt with arguments {'static_parser': 'True', 'no_print': 'None', 'version_check': 'True', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'target_path': 'None', 'printer_width': '80', 'write_json': 'True', 'empty': 'None', 'log_cache_events': 'False', 'introspect': 'True', 'cache_selected_only': 'False', 'fail_fast': 'False', 'debug': 'False', 'log_format': 'default', 'profiles_dir': 'C:\\Users\\veera\\.dbt', 'send_anonymous_usage_stats': 'True', 'quiet': 'False', 'warn_error': 'None', 'partial_parse': 'True', 'use_colors': 'True', 'indirect_selection': 'eager', 'invocation_command': 'dbt init lakehouse_lite', 'use_experimental_parser': 'False', 'log_path': 'logs'}
+[0m16:11:35.434147 [info ] [MainThread]: Creating dbt configuration folder at C:\Users\veera\.dbt
+[0m16:11:35.439372 [debug] [MainThread]: Starter project path: E:\MyProjects\lakehouse-lite\.venv\Lib\site-packages\dbt\include\starter_project
+[0m16:11:35.569500 [info ] [MainThread]: 
+Your new dbt project "lakehouse_lite" was created!
+
+For more information on how to configure the profiles.yml file,
+please consult the dbt documentation here:
+
+  https://docs.getdbt.com/docs/configure-your-profile
+
+One more thing:
+
+Need help? Don't hesitate to reach out to us via GitHub issues or on Slack:
+
+  https://community.getdbt.com/
+
+Happy modeling!
+
+[0m16:11:35.569500 [info ] [MainThread]: Setting up your profile.
+[0m16:14:32.425983 [info ] [MainThread]: Profile lakehouse_lite written to C:\Users\veera\.dbt\profiles.yml using target's profile_template.yml and your supplied values. Run 'dbt debug' to validate the connection.
+[0m16:14:32.425983 [debug] [MainThread]: Command `dbt init` succeeded at 16:14:32.425983 after 177.13 seconds
+[0m16:14:32.425983 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x00000216AD9DB610>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x00000216A6F71250>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x00000216A6F712D0>]}
+[0m16:14:32.431527 [debug] [MainThread]: Flushing usage events
+[0m16:14:32.964395 [debug] [MainThread]: An error was encountered while trying to flush usage events
