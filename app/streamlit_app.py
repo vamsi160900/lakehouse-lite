@@ -2,7 +2,13 @@
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+
+# Force pandas to store strings as normal Python strings (avoid Arrow LargeUtf8 issues in Streamlit UI)
+try:
+    pd.options.mode.string_storage = "python"
+except Exception:
+    pass
 
 # Local dev: reads .env if present
 load_dotenv()
@@ -10,7 +16,7 @@ load_dotenv()
 st.set_page_config(page_title="Lakehouse Lite", layout="wide")
 
 def get_config():
-    # Try Streamlit secrets first (Cloud)
+    # Streamlit Cloud secrets first
     if "DB_HOST" in st.secrets:
         return {
             "host": st.secrets["DB_HOST"],
@@ -21,7 +27,7 @@ def get_config():
             "sslmode": st.secrets.get("DB_SSLMODE", "require"),
         }
 
-    # Fallback to env vars (local)
+    # Local env fallback
     host = os.getenv("DB_HOST")
     name = os.getenv("DB_NAME")
     user = os.getenv("DB_USER")
@@ -55,7 +61,13 @@ def get_engine():
 def load_summary():
     engine = get_engine()
     q = "select * from analytics.mart_penguin_summary order by species, sex"
-    return pd.read_sql(q, engine)
+    df = pd.read_sql(q, engine)
+
+    # Extra safety: force string columns to plain python strings
+    for col in df.select_dtypes(include=["object", "string"]).columns:
+        df[col] = df[col].astype(str)
+
+    return df
 
 st.title("Lakehouse Lite")
 st.caption("Python ingestion → Postgres raw layer → dbt transformations → Streamlit dashboard")
@@ -71,5 +83,6 @@ st.subheader("Penguin summary by species and sex")
 st.dataframe(df, use_container_width=True)
 
 st.subheader("Counts by species")
-pivot = df.pivot_table(index="species", values="penguin_count", aggfunc="sum").reset_index()
+pivot = df.groupby("species", as_index=False)["penguin_count"].sum()
+pivot["species"] = pivot["species"].astype(str)
 st.bar_chart(pivot.set_index("species"))
