@@ -1,0 +1,3 @@
+﻿-r requirements.txt
+dbt-core
+dbt-postgres
