@@ -1,88 +1,175 @@
 ﻿import os
+from urllib.parse import quote_plus
+
 import pandas as pd
+import plotly.express as px
 import streamlit as st
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
-# Force pandas to store strings as normal Python strings (avoid Arrow LargeUtf8 issues in Streamlit UI)
-try:
-    pd.options.mode.string_storage = "python"
-except Exception:
-    pass
 
-# Local dev: reads .env if present
-load_dotenv()
-
-st.set_page_config(page_title="Lakehouse Lite", layout="wide")
-
-def get_config():
-    # Streamlit Cloud secrets first
-    if "DB_HOST" in st.secrets:
-        return {
-            "host": st.secrets["DB_HOST"],
-            "port": str(st.secrets.get("DB_PORT", "5432")),
-            "name": st.secrets["DB_NAME"],
-            "user": st.secrets["DB_USER"],
-            "password": st.secrets["DB_PASSWORD"],
-            "sslmode": st.secrets.get("DB_SSLMODE", "require"),
-        }
-
-    # Local env fallback
-    host = os.getenv("DB_HOST")
-    name = os.getenv("DB_NAME")
-    user = os.getenv("DB_USER")
-    password = os.getenv("DB_PASSWORD")
-
-    if not all([host, name, user, password]):
+# ----------------------------
+# Config helpers
+# ----------------------------
+def _try_get_streamlit_secret(key: str):
+    """
+    Safely read st.secrets without crashing when secrets.toml doesn't exist locally.
+    """
+    try:
+        # Accessing st.secrets can throw StreamlitSecretNotFoundError if no secrets file exists
+        return st.secrets.get(key, None)
+    except Exception:
         return None
 
-    return {
-        "host": host,
-        "port": os.getenv("DB_PORT", "5432"),
-        "name": name,
-        "user": user,
-        "password": password,
-        "sslmode": os.getenv("DB_SSLMODE", ""),
+
+def get_db_config() -> dict:
+    """
+    Priority:
+    1) Environment variables (local .env loaded into process OR set in terminal)
+    2) Streamlit secrets (Streamlit Cloud)
+    """
+    cfg = {
+        "DB_HOST": os.getenv("DB_HOST") or _try_get_streamlit_secret("DB_HOST"),
+        "DB_PORT": os.getenv("DB_PORT") or _try_get_streamlit_secret("DB_PORT") or "5432",
+        "DB_NAME": os.getenv("DB_NAME") or _try_get_streamlit_secret("DB_NAME"),
+        "DB_USER": os.getenv("DB_USER") or _try_get_streamlit_secret("DB_USER"),
+        "DB_PASSWORD": os.getenv("DB_PASSWORD") or _try_get_streamlit_secret("DB_PASSWORD"),
+        "DB_SSLMODE": os.getenv("DB_SSLMODE") or _try_get_streamlit_secret("DB_SSLMODE") or "require",
     }
 
-def get_engine():
-    cfg = get_config()
-    if not cfg:
-        st.error("Database secrets are missing. Open Manage app → Settings → Secrets and add DB_HOST, DB_NAME, DB_USER, DB_PASSWORD.")
+    missing = [k for k, v in cfg.items() if not v and k != "DB_SSLMODE"]
+    if missing:
+        st.error(
+            "Missing DB config: " + ", ".join(missing) +
+            "\n\nFix: set env vars (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, DB_SSLMODE) "
+            "or add them to Streamlit Secrets."
+        )
         st.stop()
 
-    url = f"postgresql+psycopg2://{cfg['user']}:{cfg['password']}@{cfg['host']}:{cfg['port']}/{cfg['name']}"
-    if cfg.get("sslmode"):
-        url += f"?sslmode={cfg['sslmode']}"
+    return cfg
 
-    return create_engine(url)
 
-@st.cache_data(ttl=60)
-def load_summary():
-    engine = get_engine()
-    q = "select * from analytics.mart_penguin_summary order by species, sex"
-    df = pd.read_sql(q, engine)
+def make_engine():
+    cfg = get_db_config()
+    user = cfg["DB_USER"]
+    pwd = quote_plus(cfg["DB_PASSWORD"] or "")
+    host = cfg["DB_HOST"]
+    port = cfg["DB_PORT"]
+    db = cfg["DB_NAME"]
+    ssl = cfg["DB_SSLMODE"] or "require"
 
-    # Extra safety: force string columns to plain python strings
-    for col in df.select_dtypes(include=["object", "string"]).columns:
-        df[col] = df[col].astype(str)
+    url = f"postgresql+psycopg2://{user}:{pwd}@{host}:{port}/{db}?sslmode={ssl}"
+    return create_engine(url, pool_pre_ping=True)
+
+
+def _fix_for_streamlit(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Avoid Streamlit frontend Arrow errors like: LargeUtf8 not recognized.
+    Force all text-like columns to plain Python strings.
+    """
+    df = df.copy()
+
+    for c in df.columns:
+        dt = str(df[c].dtype)
+        # handle pandas string[pyarrow] or any pyarrow-backed dtypes
+        if "pyarrow" in dt or "Arrow" in dt or dt.startswith("string[pyarrow]"):
+            df[c] = df[c].astype("string")
+
+    # also ensure object columns are clean strings (helps prevent LargeUtf8 issues)
+    for c in df.columns:
+        if df[c].dtype == "object":
+            # only convert if it looks like strings (not dict/list)
+            sample = df[c].dropna().head(5).tolist()
+            if all(isinstance(x, (str, int, float, bool)) for x in sample):
+                df[c] = df[c].astype("string")
 
     return df
+
+
+# ----------------------------
+# Data loaders
+# ----------------------------
+@st.cache_data(ttl=300)
+def load_summary() -> pd.DataFrame:
+    engine = make_engine()
+    q = """
+    select
+      species,
+      sex,
+      penguin_count,
+      avg_body_mass_g,
+      avg_flipper_length_mm
+    from analytics.mart_penguin_summary
+    order by species, sex;
+    """
+    df = pd.read_sql(q, engine)
+    return _fix_for_streamlit(df)
+
+
+@st.cache_data(ttl=300)
+def load_raw_sample(limit: int = 10) -> pd.DataFrame:
+    engine = make_engine()
+    q = text(f"""
+    select
+      species,
+      island,
+      bill_length_mm,
+      bill_depth_mm,
+      flipper_length_mm,
+      body_mass_g,
+      sex
+    from raw.penguins
+    limit :limit;
+    """)
+    with engine.begin() as conn:
+        df = pd.read_sql(q, conn, params={"limit": int(limit)})
+    return _fix_for_streamlit(df)
+
+
+# ----------------------------
+# UI
+# ----------------------------
+st.set_page_config(page_title="Lakehouse Lite", layout="wide")
 
 st.title("Lakehouse Lite")
 st.caption("Python ingestion → Postgres raw layer → dbt transformations → Streamlit dashboard")
 
-df = load_summary()
+summary = load_summary()
 
-left, mid, right = st.columns(3)
-left.metric("Total groups", int(df.shape[0]))
-mid.metric("Total penguins", int(df["penguin_count"].sum()))
-right.metric("Species count", int(df["species"].nunique()))
+# KPIs
+col1, col2, col3 = st.columns(3)
 
+total_groups = int(len(summary))
+total_penguins = int(summary["penguin_count"].sum()) if "penguin_count" in summary.columns else 0
+species_count = int(summary["species"].nunique()) if "species" in summary.columns else 0
+
+col1.metric("Total groups", total_groups)
+col2.metric("Total penguins", total_penguins)
+col3.metric("Species count", species_count)
+
+st.divider()
+
+# Table
 st.subheader("Penguin summary by species and sex")
-st.dataframe(df, use_container_width=True)
+st.dataframe(summary, width="stretch")
 
+# Charts
 st.subheader("Counts by species")
-pivot = df.groupby("species", as_index=False)["penguin_count"].sum()
-pivot["species"] = pivot["species"].astype(str)
-st.bar_chart(pivot.set_index("species"))
+by_species = (
+    summary.groupby("species", as_index=False)["penguin_count"]
+    .sum()
+    .sort_values("penguin_count", ascending=False)
+)
+fig1 = px.bar(by_species, x="species", y="penguin_count")
+st.plotly_chart(fig1, width="stretch")
+
+st.subheader("Counts by species and sex")
+fig2 = px.bar(summary, x="species", y="penguin_count", color="sex", barmode="group")
+st.plotly_chart(fig2, width="stretch")
+
+st.divider()
+
+# Raw sample
+st.subheader("Raw penguins sample")
+limit = st.slider("Rows to show", min_value=5, max_value=50, value=10, step=5)
+raw_df = load_raw_sample(limit=limit)
+st.dataframe(raw_df, width="stretch")
