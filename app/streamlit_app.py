@@ -1,13 +1,14 @@
 ﻿import os
 import pandas as pd
 import streamlit as st
-import plotly.express as px
 
-import pyarrow as pa
+import plotly.express as px
+import plotly.graph_objects as go
+
 from sqlalchemy import create_engine
 from urllib.parse import quote_plus
 
-# Only used for local runs (Streamlit Cloud won't need it)
+# Local only (Streamlit Cloud won't need this)
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -15,18 +16,15 @@ except Exception:
     pass
 
 
-# ----------------------------
-# Helpers
-# ----------------------------
 def get_config(key: str, default: str | None = None) -> str | None:
-    # Streamlit Cloud: secrets
+    # Streamlit Cloud secrets
     try:
         if hasattr(st, "secrets") and key in st.secrets:
             return str(st.secrets[key])
     except Exception:
         pass
 
-    # Local: env vars / .env
+    # Local env vars / .env
     return os.getenv(key, default)
 
 
@@ -49,48 +47,6 @@ def make_engine():
     return create_engine(url, pool_pre_ping=True)
 
 
-def to_arrow_safe(df: pd.DataFrame) -> pa.Table:
-    # Make a clean copy
-    df = df.copy()
-
-    # Replace NaN with None
-    df = df.where(pd.notnull(df), None)
-
-    # Force string/object columns into plain Python strings
-    for c in df.columns:
-        if pd.api.types.is_string_dtype(df[c]) or df[c].dtype == object:
-            df[c] = df[c].apply(lambda x: None if x is None else str(x))
-
-    # Convert to Arrow table
-    t = pa.Table.from_pandas(df, preserve_index=False)
-
-    # Cast LargeUtf8 -> Utf8 (normal string)
-    new_fields = []
-    for f in t.schema:
-        if pa.types.is_large_string(f.type):
-            new_fields.append(pa.field(f.name, pa.string()))
-        else:
-            new_fields.append(f)
-
-    try:
-        t = t.cast(pa.schema(new_fields))
-    except Exception:
-        # fallback: cast column-by-column
-        cols = []
-        for i, f in enumerate(t.schema):
-            col = t.column(i)
-            if pa.types.is_large_string(f.type):
-                cols.append(col.cast(pa.string()))
-            else:
-                cols.append(col)
-        t = pa.Table.from_arrays(cols, names=t.schema.names)
-
-    return t
-
-
-# ----------------------------
-# Queries
-# ----------------------------
 @st.cache_data(ttl=300)
 def load_summary() -> pd.DataFrame:
     engine = make_engine()
@@ -126,9 +82,28 @@ def load_raw(limit: int = 25) -> pd.DataFrame:
     return pd.read_sql(q, engine)
 
 
-# ----------------------------
-# UI
-# ----------------------------
+def df_to_plotly_table(df: pd.DataFrame, max_rows: int = 50, title: str | None = None):
+    d = df.copy()
+    if max_rows:
+        d = d.head(max_rows)
+
+    # Clean NaN/None and make safe strings
+    d = d.where(pd.notnull(d), "")
+    for c in d.columns:
+        if d[c].dtype == object:
+            d[c] = d[c].astype(str)
+
+    header = dict(values=list(d.columns))
+    cells = dict(values=[d[c].tolist() for c in d.columns])
+
+    fig = go.Figure(data=[go.Table(header=header, cells=cells)])
+    if title:
+        fig.update_layout(title=title)
+    fig.update_layout(margin=dict(l=0, r=0, t=40 if title else 10, b=0))
+    return fig
+
+
+# ---------------- UI ----------------
 st.set_page_config(page_title="Lakehouse Lite", layout="wide")
 
 st.title("Lakehouse Lite")
@@ -148,11 +123,9 @@ c2.metric("Total penguins", total_penguins)
 c3.metric("Species count", species_count)
 
 st.subheader("Penguin summary by species and sex")
+st.plotly_chart(df_to_plotly_table(summary, max_rows=50), use_container_width=True)
 
-# Table (Arrow-safe)
-st.dataframe(to_arrow_safe(summary), use_container_width=True)
-
-# ONE chart only: species + sex
+# ONE chart only
 st.subheader("Counts by species and sex")
 fig = px.bar(
     summary,
@@ -165,4 +138,4 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("Raw penguins sample")
-st.dataframe(to_arrow_safe(raw_df), use_container_width=True)
+st.plotly_chart(df_to_plotly_table(raw_df, max_rows=25), use_container_width=True)
