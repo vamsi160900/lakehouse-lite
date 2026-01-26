@@ -50,10 +50,10 @@ This repo is built to show the “real job” workflow end-to-end:
 - deliver something visible (dashboard)
 
 ## Quick highlights
-- Built an end-to-end analytics pipeline: **Python ingestion → Postgres raw → dbt transforms/tests → Streamlit dashboard**
-- Implemented **warehouse layering** (raw/staging/mart) with clear ownership and naming
-- Added **data quality checks** in dbt (not_null tests) to prevent bad data from reaching analytics
-- Produced a **business-ready mart** (`analytics.mart_penguin_summary`) with counts and averages used by the dashboard
-- Deployed a **live dashboard** so anyone can review results without running code locally
+- Built an end-to-end analytics pipeline: **Python ingestion → Postgres raw → dbt transforms/tests → Streamlit dashboard**.
+- Implemented **warehouse layering** (raw/staging/mart) with clear ownership and naming.
+- Added **data quality checks** in dbt (not_null tests) to prevent bad data from reaching analytics.
+- Produced a **business-ready mart** (`analytics.mart_penguin_summary`) with counts and averages used by the dashboard.
+- Deployed a **live dashboard** so anyone can review results without running code locally.
 
 
