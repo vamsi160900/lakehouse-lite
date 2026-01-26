@@ -157,7 +157,7 @@ safe_divider()
 
 # Table
 st.subheader("Penguin summary by species and sex")
-st.dataframe(summary, width="stretch")
+st.dataframe(summary, use_container_width=True)
 
 # Charts
 st.subheader("Counts by species")
@@ -167,11 +167,11 @@ by_species = (
     .sort_values("penguin_count", ascending=False)
 )
 fig1 = px.bar(by_species, x="species", y="penguin_count")
-st.plotly_chart(fig1, width="stretch")
+st.plotly_chart(fig1, use_container_width=True)
 
 st.subheader("Counts by species and sex")
 fig2 = px.bar(summary, x="species", y="penguin_count", color="sex", barmode="group")
-st.plotly_chart(fig2, width="stretch")
+st.plotly_chart(fig2, use_container_width=True)
 
 safe_divider()
 
@@ -179,4 +179,4 @@ safe_divider()
 st.subheader("Raw penguins sample")
 limit = st.slider("Rows to show", min_value=5, max_value=50, value=10, step=5)
 raw_df = load_raw_sample(limit=limit)
-st.dataframe(raw_df, width="stretch")
+st.dataframe(raw_df, use_container_width=True)
