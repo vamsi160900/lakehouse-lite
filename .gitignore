@@ -7,3 +7,7 @@ __pycache__/
 .env.neon
 
 .streamlit/secrets.toml
+
+.streamlit/secrets.toml
+
+.streamlit/secrets.toml
