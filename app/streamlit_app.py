@@ -4,6 +4,13 @@ from urllib.parse import quote_plus
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+def safe_divider():
+    # Streamlit older versions don't have st.divider()
+    if hasattr(st, "divider"):
+        st.divider()
+    else:
+        st.markdown("---")
+
 from sqlalchemy import create_engine, text
 
 
@@ -146,7 +153,7 @@ col1.metric("Total groups", total_groups)
 col2.metric("Total penguins", total_penguins)
 col3.metric("Species count", species_count)
 
-st.divider()
+safe_divider()
 
 # Table
 st.subheader("Penguin summary by species and sex")
@@ -166,7 +173,7 @@ st.subheader("Counts by species and sex")
 fig2 = px.bar(summary, x="species", y="penguin_count", color="sex", barmode="group")
 st.plotly_chart(fig2, width="stretch")
 
-st.divider()
+safe_divider()
 
 # Raw sample
 st.subheader("Raw penguins sample")
