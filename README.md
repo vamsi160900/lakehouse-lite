@@ -78,6 +78,8 @@ powershell:
 cd ..\..
 streamlit run app\streamlit_app.py
 
+Raw dataset: data/raw/penguins.csv
+
 ## Deployment notes
 - Streamlit app is deployed on Streamlit Community Cloud
 - Database is Neon Postgres
