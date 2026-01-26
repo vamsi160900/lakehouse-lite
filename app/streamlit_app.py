@@ -2,63 +2,44 @@
 from urllib.parse import quote_plus
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
-def safe_divider():
-    # Streamlit older versions don't have st.divider()
-    if hasattr(st, "divider"):
-        st.divider()
-    else:
-        st.markdown("---")
-
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+import plotly.express as px
 
 
-# ----------------------------
-# Config helpers
-# ----------------------------
-def _try_get_streamlit_secret(key: str):
-    """
-    Safely read st.secrets without crashing when secrets.toml doesn't exist locally.
-    """
+def _get_cfg_value(key: str, default: str | None = None) -> str | None:
+    # Streamlit Cloud uses st.secrets, local can use env vars
     try:
-        # Accessing st.secrets can throw StreamlitSecretNotFoundError if no secrets file exists
-        return st.secrets.get(key, None)
+        if hasattr(st, "secrets") and key in st.secrets:
+            return str(st.secrets[key])
     except Exception:
-        return None
+        pass
+    return os.getenv(key, default)
 
 
 def get_db_config() -> dict:
-    """
-    Priority:
-    1) Environment variables (local .env loaded into process OR set in terminal)
-    2) Streamlit secrets (Streamlit Cloud)
-    """
-    cfg = {
-        "DB_HOST": os.getenv("DB_HOST") or _try_get_streamlit_secret("DB_HOST"),
-        "DB_PORT": os.getenv("DB_PORT") or _try_get_streamlit_secret("DB_PORT") or "5432",
-        "DB_NAME": os.getenv("DB_NAME") or _try_get_streamlit_secret("DB_NAME"),
-        "DB_USER": os.getenv("DB_USER") or _try_get_streamlit_secret("DB_USER"),
-        "DB_PASSWORD": os.getenv("DB_PASSWORD") or _try_get_streamlit_secret("DB_PASSWORD"),
-        "DB_SSLMODE": os.getenv("DB_SSLMODE") or _try_get_streamlit_secret("DB_SSLMODE") or "require",
+    return {
+        "DB_HOST": _get_cfg_value("DB_HOST"),
+        "DB_PORT": _get_cfg_value("DB_PORT", "5432"),
+        "DB_NAME": _get_cfg_value("DB_NAME"),
+        "DB_USER": _get_cfg_value("DB_USER"),
+        "DB_PASSWORD": _get_cfg_value("DB_PASSWORD"),
+        "DB_SSLMODE": _get_cfg_value("DB_SSLMODE", "require"),
     }
-
-    missing = [k for k, v in cfg.items() if not v and k != "DB_SSLMODE"]
-    if missing:
-        st.error(
-            "Missing DB config: " + ", ".join(missing) +
-            "\n\nFix: set env vars (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, DB_SSLMODE) "
-            "or add them to Streamlit Secrets."
-        )
-        st.stop()
-
-    return cfg
 
 
 def make_engine():
     cfg = get_db_config()
+    missing = [k for k, v in cfg.items() if not v and k != "DB_SSLMODE"]
+    if missing:
+        st.error(
+            "Missing DB config: " + ", ".join(missing) +
+            ". Add them in Streamlit Cloud -> App settings -> Secrets (or set env vars locally)."
+        )
+        st.stop()
+
     user = cfg["DB_USER"]
-    pwd = quote_plus(cfg["DB_PASSWORD"] or "")
+    pwd = quote_plus(cfg["DB_PASSWORD"])
     host = cfg["DB_HOST"]
     port = cfg["DB_PORT"]
     db = cfg["DB_NAME"]
@@ -68,73 +49,69 @@ def make_engine():
     return create_engine(url, pool_pre_ping=True)
 
 
-def _fix_for_streamlit(df: pd.DataFrame) -> pd.DataFrame:
+def make_streamlit_safe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Avoid Streamlit frontend Arrow errors like: LargeUtf8 not recognized.
-    Force all text-like columns to plain Python strings.
+    Fix Streamlit Cloud 'LargeUtf8' error by forcing string/object columns
+    into normal python object strings before st.dataframe().
     """
     df = df.copy()
-
-    for c in df.columns:
-        dt = str(df[c].dtype)
-        # handle pandas string[pyarrow] or any pyarrow-backed dtypes
-        if "pyarrow" in dt or "Arrow" in dt or dt.startswith("string[pyarrow]"):
-            df[c] = df[c].astype("string")
-
-    # also ensure object columns are clean strings (helps prevent LargeUtf8 issues)
-    for c in df.columns:
-        if df[c].dtype == "object":
-            # only convert if it looks like strings (not dict/list)
-            sample = df[c].dropna().head(5).tolist()
-            if all(isinstance(x, (str, int, float, bool)) for x in sample):
-                df[c] = df[c].astype("string")
-
+    for col in df.columns:
+        if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
+            # convert to python strings, keep NaN as empty for clean display
+            df[col] = df[col].astype("object").where(df[col].notna(), "")
     return df
 
 
-# ----------------------------
-# Data loaders
-# ----------------------------
 @st.cache_data(ttl=300)
 def load_summary() -> pd.DataFrame:
     engine = make_engine()
     q = """
-    select
-      species,
-      sex,
-      penguin_count,
-      avg_body_mass_g,
-      avg_flipper_length_mm
+    select species, sex, penguin_count, avg_body_mass_g, avg_flipper_length_mm
     from analytics.mart_penguin_summary
-    order by species, sex;
+    order by species, sex
     """
     df = pd.read_sql(q, engine)
-    return _fix_for_streamlit(df)
+    return make_streamlit_safe(df)
+
+
+@st.cache_data(ttl=300)
+def load_counts_by_species() -> pd.DataFrame:
+    engine = make_engine()
+    q = """
+    select species, sum(penguin_count)::int as penguin_count
+    from analytics.mart_penguin_summary
+    group by species
+    order by species
+    """
+    df = pd.read_sql(q, engine)
+    return make_streamlit_safe(df)
+
+
+@st.cache_data(ttl=300)
+def load_counts_by_species_sex() -> pd.DataFrame:
+    engine = make_engine()
+    q = """
+    select species, sex, penguin_count
+    from analytics.mart_penguin_summary
+    order by species, sex
+    """
+    df = pd.read_sql(q, engine)
+    return make_streamlit_safe(df)
 
 
 @st.cache_data(ttl=300)
 def load_raw_sample(limit: int = 10) -> pd.DataFrame:
     engine = make_engine()
-    q = text(f"""
-    select
-      species,
-      island,
-      bill_length_mm,
-      bill_depth_mm,
-      flipper_length_mm,
-      body_mass_g,
-      sex
-    from raw.penguins
-    limit :limit;
-    """)
-    with engine.begin() as conn:
-        df = pd.read_sql(q, conn, params={"limit": int(limit)})
-    return _fix_for_streamlit(df)
+    q = f"""
+    select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex
+    from analytics.stg_penguins
+    order by species, island
+    limit {int(limit)}
+    """
+    df = pd.read_sql(q, engine)
+    return make_streamlit_safe(df)
 
 
-# ----------------------------
-# UI
-# ----------------------------
 st.set_page_config(page_title="Lakehouse Lite", layout="wide")
 
 st.title("Lakehouse Lite")
@@ -142,41 +119,34 @@ st.caption("Python ingestion → Postgres raw layer → dbt transformations → 
 
 summary = load_summary()
 
-# KPIs
-col1, col2, col3 = st.columns(3)
-
 total_groups = int(len(summary))
-total_penguins = int(summary["penguin_count"].sum()) if "penguin_count" in summary.columns else 0
-species_count = int(summary["species"].nunique()) if "species" in summary.columns else 0
+total_penguins = int(pd.to_numeric(summary["penguin_count"], errors="coerce").fillna(0).sum())
+species_count = int(summary["species"].nunique())
 
-col1.metric("Total groups", total_groups)
-col2.metric("Total penguins", total_penguins)
-col3.metric("Species count", species_count)
+c1, c2, c3 = st.columns(3)
+c1.metric("Total groups", total_groups)
+c2.metric("Total penguins", total_penguins)
+c3.metric("Species count", species_count)
 
-safe_divider()
+# divider (safe across versions)
+if hasattr(st, "divider"):
+    st.divider()
+else:
+    st.markdown("---")
 
-# Table
 st.subheader("Penguin summary by species and sex")
 st.dataframe(summary, use_container_width=True)
 
-# Charts
-st.subheader("Counts by species")
-by_species = (
-    summary.groupby("species", as_index=False)["penguin_count"]
-    .sum()
-    .sort_values("penguin_count", ascending=False)
-)
-fig1 = px.bar(by_species, x="species", y="penguin_count")
+# charts
+counts_species = load_counts_by_species()
+fig1 = px.bar(counts_species, x="species", y="penguin_count", title="Counts by species")
 st.plotly_chart(fig1, use_container_width=True)
 
-st.subheader("Counts by species and sex")
-fig2 = px.bar(summary, x="species", y="penguin_count", color="sex", barmode="group")
+counts_species_sex = load_counts_by_species_sex()
+fig2 = px.bar(counts_species_sex, x="species", y="penguin_count", color="sex", barmode="group",
+              title="Counts by species and sex")
 st.plotly_chart(fig2, use_container_width=True)
 
-safe_divider()
-
-# Raw sample
 st.subheader("Raw penguins sample")
-limit = st.slider("Rows to show", min_value=5, max_value=50, value=10, step=5)
-raw_df = load_raw_sample(limit=limit)
+raw_df = load_raw_sample(10)
 st.dataframe(raw_df, use_container_width=True)
