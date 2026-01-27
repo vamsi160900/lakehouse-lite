@@ -7,14 +7,13 @@ from sqlalchemy import create_engine, text
 
 
 def _get_secret(key: str, default: str | None = None) -> str | None:
-    # Streamlit Cloud: st.secrets works
+    # Streamlit Cloud: st.secrets
     try:
         if hasattr(st, "secrets") and key in st.secrets:
             return str(st.secrets[key])
     except Exception:
         pass
-
-    # Local: fall back to env vars
+    # Local: env vars
     return os.getenv(key, default)
 
 
@@ -39,6 +38,31 @@ def make_engine():
     ssl = cfg["DB_SSLMODE"] or "require"
     url = f"postgresql+psycopg2://{user}:{pwd}@{host}:{port}/{db}?sslmode={ssl}"
     return create_engine(url, pool_pre_ping=True)
+
+
+def render_table_html(df: pd.DataFrame, height_px: int = 520):
+    # Convert to safe strings to avoid any Arrow/typing issues
+    safe = df.copy()
+    for c in safe.columns:
+        if pd.api.types.is_datetime64_any_dtype(safe[c]):
+            safe[c] = safe[c].astype(str)
+        elif pd.api.types.is_numeric_dtype(safe[c]):
+            # keep numeric as-is
+            pass
+        else:
+            safe[c] = safe[c].fillna("").astype(str)
+
+    html = safe.to_html(index=False, escape=True)
+
+    # Scrollable container
+    st.markdown(
+        f"""
+        <div style="height:{height_px}px; overflow:auto; border:1px solid #e6e6e6; border-radius:8px; padding:8px;">
+            {html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 @st.cache_data(ttl=300)
@@ -72,7 +96,7 @@ def load_summary():
     with engine.connect() as conn:
         df = pd.read_sql(text(q), conn)
 
-    # Make types cloud-safe
+    # Basic cleanup
     df = df.copy()
     df["species"] = df["species"].astype(str).str.strip()
     df["sex"] = df["sex"].fillna("unknown").astype(str).str.strip()
@@ -100,15 +124,15 @@ def load_raw_all():
     with engine.connect() as conn:
         df = pd.read_sql(text(q), conn)
 
-    # Cloud-safe types (avoid Arrow "LargeUtf8"/schema issues)
+    # Make sure types are simple
     df = df.copy()
-    for c in df.columns:
-        if df[c].dtype == "object":
-            df[c] = df[c].fillna("").astype(str)
-
     for c in ["bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    for c in ["species", "island", "sex"]:
+        if c in df.columns:
+            df[c] = df[c].fillna("").astype(str)
 
     return df
 
@@ -118,7 +142,6 @@ st.set_page_config(page_title="Lakehouse Lite", layout="wide")
 st.title("Lakehouse Lite")
 st.caption("Python ingestion → Postgres raw layer → dbt transformations → Streamlit dashboard")
 
-# KPI cards
 m = load_metrics()
 c1, c2, c3 = st.columns(3)
 c1.metric("Total groups", int(m["total_groups"]))
@@ -129,11 +152,11 @@ st.markdown("---")
 
 st.subheader("Penguin summary by species and sex")
 summary = load_summary()
-st.dataframe(summary, use_container_width=True)
+render_table_html(summary, height_px=320)
 
 st.markdown("---")
 
 st.subheader("Raw penguins (all rows)")
 raw_df = load_raw_all()
 st.caption(f"Rows: {len(raw_df)}")
-st.dataframe(raw_df, use_container_width=True, height=650)
+render_table_html(raw_df, height_px=650)
