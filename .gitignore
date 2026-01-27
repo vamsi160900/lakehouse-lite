@@ -13,3 +13,18 @@ __pycache__/
 .streamlit/secrets.toml
 
 .streamlit/secrets.toml
+
+# secrets / env (never commit)
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# local venv / caches
+.venv/
+__pycache__/
+*.pyc
+
+# local helpers / scratch
+*.log
+
